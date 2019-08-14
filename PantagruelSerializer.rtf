@@ -1,0 +1,218 @@
+{\rtf1\ansi\ansicpg1252\deff0\nouicompat{\fonttbl{\f0\fnil\fcharset0 Calibri;}{\f1\fnil\fcharset0 Consolas;}{\f2\fnil\fcharset0 Arial;}{\f3\fnil\fcharset2 Symbol;}}
+{\colortbl ;\red0\green77\blue187;\red102\green102\blue102;\red255\green255\blue255;\red128\green128\blue128;\red192\green192\blue192;\red0\green0\blue0;}
+{\*\generator Riched20 10.0.10240}\viewkind4\uc1 
+\pard\li720\ri720\sa200\sl240\slmult1\qc\tx900\f0\fs24\lang9\par
+Pantagruel\par
+Guide To Using the XML Serializer\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\fs20\par
+\b\fs24 Introduction\b0\par
+\fs20\tab Lets get two things out of the way immediately.\par
+1) Serialization is complex and rarely will things \i just work\i0  without taking some time to review and test your code.\par
+2) People that write technical guides are in the habit of talkng to themselves. They need to be in order to predict all the zany questions that will pop up in the readers' heads.\par
+\tab Given those two facts this guide will often take the form of a F.A.Q. rather than a dry and boring old list of specs. The great thing about it is that I get to decide what \i you\i0  will be saying. In the event that you still find questions that I haven't managed to pull from the aether of thought, please feel free to send any additional questions and concers to \cf1 pgi-support@ancientcraftgames.com\par
+\cf0\tab The XML serializer packaged with Pantagruel was designed with the idea that you just throw your data at it and it will magically figure out what to do and later when you want it back it will just as magically barf it all back out just as you left it. The reality is, however, that as a programmer you still need to be aware of what is actually happening and take extra steps, precautions, and responsibilities when designing your data structures to ensure everything works as it should. Nothing is truly free or magical. This guide will explain what the serializer is doing to your precious data and what steps you will need to take ensure nothing unexpected happens to it. If you are generally unfamiliar with the idea of serialization, what it does, and what kinds of attributes can be used to control it it you may want to take some time reading up on it at msdn. If you are very at home with serialization and just need a cheat sheet then feel free to skip the the Appendix at the end for a dry and boring old list of specs.\par
+\par
+\b\fs24 Modes of Operation\par
+\cf2\b0\i\fs20 ~ Okay, so how do I use this thing?\par
+\cf0\i0\tab Aha! See there? I'm putting words in your mouth already. Anyway, it is simply a matter of calling the static methods on the serializer and deserializer classes. When you want to save some data simply use:\par
+
+\pard\li720\ri720\sl240\slmult1\tx900\cf3\highlight4\f1\fs18 XmlSerializer.Serialize(object obj, int version, string rootName);\par
+\cf0\highlight5\fs20\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\highlight0\f0\tab The first parameter is the data you want to serialize, whatever that may be. The second value is mostly optional and can be used during deserialization to see if the data your are deserializing can be expected to match the current state of the classes it represents. Whenever you perform major refactoring of your classes this version number should likely be bumped up to avoid trying to deserialize data into fields that may no longer exist. The final parameter is the name of the root XML element. This string must conform to standard XML element naming conventions (no spaces or wierd characters). In the event that you pass a GameObject to this method the rootName parameter will be ignored and the name of the GameObject will be used. There is also an overload of this method that simply takes a GameObject and version number. The XMLDocument returned will contain all of the serialized data and can then be written to file, converted to a string, compressed and sent over the wire or whatever it is you plan to do with the data. When it is time to retreive your data you will want to use:\par
+
+\pard\li720\ri720\sl240\slmult1\tx900\cf3\highlight4\f1\fs18 XmlDeserializer.Deserialize(string xml, int maxVersion);\par
+\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\cf0\highlight0\f0\fs20\tab The first parameter is the xml text (which can be retrived from an XmlDocument.InnerXml field) and the max version of the data that this deserializer should allow. The object returned will be of the same type that was passed in to the serialize method so you'll need to cast it back to that. There is one other method you'll need to use on certain occations. For reasons that will be explained later, if you passed any object derived from \i UnityEngine.Component \i0 (for example Rigibody2D, AudioSource, Transform, or any kind of MonoBehaviour) then you will need to use a special deserializer to handle getting it back out. It takes the form of:\par
+
+\pard\li720\ri720\sl240\slmult1\tx900\cf3\highlight4\f1\fs18 XmlDeserializer.DeserializeComponent<T>(string xml,T receiver, int maxVersion);\par
+\cf0\highlight0\b\f0\fs20\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\b0\tab The new parameter is of course \i receiver\i0 . You should pass an existing Component from a GameObject that is of the same type as was serialized previously. This method will then set all fields and properties to match the state of the serialized data.\b\par
+\cf2\b0\i ~ Sounds simple! So what kinds of things can I serialize with this thing?\par
+\cf0\i0\tab Pantagruel is designed to  work opaquely. That is to say, you simply feed it some data and it does its thing. Internally it does handle things differently depending on what kind of data it is fed though. And it is important to understand the differences and limitations of those differences. For the most part however you can just given it anything and it will be handled. Primitives like ints and floats, immutables like strings and Vector3, complex user-defined datatypes with circular references, GameObjects. Generic types, List<>, Dictionary<>, delegates. You can even use polymorphic references to classes that were downcast. The only real setback is if a class does not define a default parameterless contructor. In this case it will necessary to supply a serialization surrogate that can handle instatianting the type.\par
+\tab Despite all of these abilities there are still a few issues that need to be considered when serializing certain kinds of data. For the most part the serializer internally is operating in one of several 'modes' so-to-speak. These modes are invisible to you and are based on the context of the kind of data that the serializer is being given. No specific action needs to be taken to ensure the serializer is 'operating in the correct mode'.\par
+\ul Standard Mode:\ulnone\par
+\tab The first mode of opertation is called \i Standard Mode\i0 . The serializer is in this mode when you hand it any kind of primitive or complex data type that isn't a GameObject or Unity Component. User-defined classes, .Net types, int, floats, strings, Lists, Dictionaries, you name it. Heck, even delegates (although it can get quite hairy sometimes so I'd recommend it only in limitied situations). This is meant to work like any other kind of serializer. You can generally just push the data in, supply a version number and a root xml element name and be done with it. When you deserialize the data it will all be as you left it. \par
+\tab However, there are two big caveats: In this mode references to GameObjects and Components will \i not \i0 be serialized! This is because there is simply no useful context for them. GameObjects exist in a scene graph hierarchy and need to know where they would belong in that hierarchy. We can't simply serialize the parent object too because we wouldn't know of a good place to stop. Next thing you know you'd have the entire scene serialized! Same goes for Components. They can't exist naked without a GameObject (they can't even be initialized like that!) and we'd need to know the whole GameObject hierarchy all over again just to serialize this one little component reference.\par
+\cf2\i ~ But I really need to preserve these references to my GameObject/Component! What if it's something important like my Game State Manager or the Player's entity?\i0\par
+\cf0\tab The recomended way to handle these things is the \i Unity Way\i0\f2\lang1033\'99\f0\lang9 . Start using components and GameObjects to store all your references to these user-made classes and then serialize the whole GameObject hierarchy (see below). Barring that, you could also use tags and search for these objects and re-attach them after deserialization.\par
+\cf2\i ~ If I  serialize an object that has a reference to another still-active object and then deserialize the data will the reference be re-linked to the original copy or will a new one be made?\par
+\cf0\i0\tab If the reference is valid for serialization then the whole object will be serialized and new copies of all objects in the graph will be instatiated. Otherwise the reference will be null. In either case if you want to re-link to already existing objects after deserialization then you will have to handle that yourself.\par
+\cf2\i ~ What about shared or circular references? Will copies be made or will it all be re-linked properly?\i0\par
+\cf0\tab The serializer will properly maintain reference ids in such cases and all shared and circular links will be resolved correctly.\par
+\ul Hierarchy Mode:\par
+\ulnone\tab This is the most common way of serialzing Unity game states. When you pass a GameObject to the serializer it will preserve the entire hierarchy with that GameObject as the root. All components attached to each GameObject and their data will also be stored. Again, there is a slight caveat: References to GameObjects or Components \i outside \i0 of the hierarchy that is being serialized will not be included. And again, this is due to the fact that the only way to store the full context would be to serialize the entire scene. So the moral of the story is if you really want all of your data serialized, either refactor it so that you are serializing the common root GameObject of all that data or use \i GameObject.Find() \i0 to look for things to re-attach after deserialization. Other than that, this mode works under the same principles as the standard mode: Shared or circular references will be properly maintained and you can expect a GameObject to pop out of the deserializer that is more-or-less the same as what you put in.\par
+\cf2\i ~ What about references to prefabs?\par
+\cf0\i0\tab Prefabs are a special case for GameObjects. In this situation what you really want is to store a reference to the prefab resource and not a particular instance of a GameObject. However, Unity doesn't provide a means of determining if a GameObject reference is to a prefab or an in-scene instance. In order for this to work you must attach a \i PrefabIdComponent\i0  to the root of your prefab. There are a whole slew of other issues as well. You can read more about it below in the 'Resources' section of this document.\i\fs22\par
+\cf2\fs20 ~ What about other resources? You know, Sprites, Maerials, Textures, Audio data, etc...\par
+\cf0\i0\tab Again, this is more complex than it sounds. Refer to the 'Resources' section below..\par
+\ul Component Mode:\par
+\ulnone\tab This is sort of a special case mode. As stated before, you can't expect to deserialize a single component and get one to pop out into the world ready to go. Unity doesn't allow naked components to be created. And even if you could get one such component, there is no way to attach such a pre-existing object to a GameObject. In many cases you would just serialize the whole GameObject and be happy. However, there might be times when it makes more sense to just store the state of a single Component - like if you wanted to send that state over the wire or clone it or store some info that isn't bloated with irrelevant data. It is entirely possible to serialize a single component just like normal. However, when deserialzing you will need to use \i XmlDeserializer.DeserializeComponent<T>(T component)\i0  to handle getting things back out. In this case you can pass it a component that is already initialized and attached to a GameObject and the deserializer will simply fill out the fields using the stored data.\ul\i\fs22\par
+\ulnone\i0\par
+\b\fs24 How Complex Types are Handled\b0\par
+\fs20\tab Pantagruel uses reflection to glean as much information as it can from complex data types. In many cases if your data serialized correctly using Unity's default serializer then you are already in the clear.  But just for the sake of review, the following rules apply:\par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\li1080\ri720\sa200\sl240\slmult1\tx900 Serializes all public fields.\par
+{\pntext\f3\'B7\tab}In some cases (UnityEngine.Object and built-in Unity components) serialize all properties with public get/set accessors.\par
+{\pntext\f3\'B7\tab}Ignores all private fields.\par
+{\pntext\f3\'B7\tab}Ignores properties on most data (except the few cases mentioned above).\par
+{\pntext\f3\'B7\tab}Ignores properties that don't have both a public \i get \i0 and public \i set \i0 accessor.\par
+{\pntext\f3\'B7\tab}Ignores all public fields marked with [NonSerialized] or [XmlIgnore].\par
+{\pntext\f3\'B7\tab}Ignores all properties marked with [XmlIgnore].\par
+{\pntext\f3\'B7\tab}Apply serialization to all base-class data of a class unless that class is marked [XmlIgnoreBaseType]\par
+{\pntext\f3\'B7\tab}Defers serialization to the object itself if marked with [IXmlSerializable].\par
+{\pntext\f3\'B7\tab}Ignores [Serializable]. This serializer will grab everything it can get its greedy little mits on.\par
+{\pntext\f3\'B7\tab}Circular or shared references are serialized once and then referenced by id after that.\par
+{\pntext\f3\'B7\tab}References to GameObjects or Components that are not part of the hierarchy being serialized will be stored as null.\par
+{\pntext\f3\'B7\tab}Delegates are serialized. The target objects that own the methods they refer to will also be serialized so make sure that's what you want.\par
+{\pntext\f3\'B7\tab}\i ISerializationSurrogates \i0 will be considered in the reverse order they were added and before using default serialization methods.\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\par
+\b\fs24 Serialization Surrogates\par
+\cf2\b0\i\fs20 ~ Hey, this is pretty great so far but I'm having trouble with a specific class. It won't serialize correctly or it is serializing too much information.\par
+\cf0\i0\tab That's not a question. But fortunately there is still an answer for your concern - Serialization surrogates. It is possible to write a small class that implements the \i ISerializationSurrogate \i0 interface and can specifically feed or receive information from the xml serializer. In this way you can translate, filter, combine, or ignore whatever data you see fit for a specific type. As a bonus to help get you started, you can derive from the \i SurrogateBase \i0 class to gain access to a lot of helper methods for retreiving data from your objects.\par
+\tab Once the surrogate is properly implemented you simply call the static method \i AddTemporarySurrogate()\i0  on the \i XmlSerializer \i0 or \i XmlDeserializer \i0 just before serializing or deserializing your data. Surrogates will handle serialization and deserialization of the type specified or of any type derived from the type specified. In this way they can be used as fallbacks for derived classes. Surrogates are considered in the reverse order they were added so the newest addition will be used first if viable. This way you can specify surrogates in order of most generic to most specfic to handle a wide variety of special datatypes. It is important to note that surrogates will \i not \i0 be considered for primitive types, only complex types.\par
+\tab There are also Activation surrogates that must implement the \i IActivationSurrogate \i0 interface and be added to the serializer or deserializer with the static method \cf6\highlight3\i AddTempoaryActivationSurrogate\lang1033 ()\i0 . Unlike, full-blown surrogates, these just provide a way of creating an instance of an object in the event that the given type does not have a default parameterless constructor.\par
+\tab Also, take note of the name 'temporary' in those methods. They surrogates will only stick around unless you serializer or deserialize something. So you will have to add all of your surrogates in every time you want to use them.\par
+\cf0\highlight0\lang9\par
+\b\fs24 Resources\par
+\cf2\b0\i\fs20 ~ Ok, so what's the deal with references to resources? You know, textures, sprites, audio clips, animator controllers, etc....\par
+\cf0\i0\tab So here is where things get real hairy. Unfortunately, Unity does not provide a way to access the internal reference used by those resources so instead, they are all serialized as strings that can be used by \i Resources.Load() \i0 at runtime to re-obtain a reference. The big issue with this is that all resources that you want to serialize \b absolutely must\b0  be stored inside a \i Resources \i0 subdirectory. If you are not familiar with the special Resources directory and the \i Resources \i0 utility class used by Unity I suggest you read up on them now.\par
+\cf2\i ~ Got it. All assets that are to be serialied must go in a Resources folder or a subdirectory of a Resources folder. Anything else?\par
+\cf0\i0\tab Yeah, that's just the beginning. Unity also doesn't provide a way to determine the path that an asset was loaded from during runtime. This means we can't simply obtain a string to serialize. So to combat this, a series of manifest files must be built at edit time. These manifest contain references to every single asset you have stored in a Resources folder and it associates each of them with the path that they can be loaded from at runtime using \i Resource.Load()\i0 . Basically, what this means is that every single time you create a new asset, if there is any chance whatsoever that it needs to be serialized, you'll have to place it in a Resources folder and then rebuild the manifest library.\par
+\tab To build a resource manifest library, navigate to the menu Window->Pantagruel->Resource Manifest and choose one of the two build options. This may take some time if you have a large project with a lot of files. The safe option will also ensure that no repeat directories are generated. After that is done you should be able to serialize any references to resources included in the manifest.\par
+\tab Another thing you will have to do for GameObject prefabs is to attach a \i PrefabId \i0 component to the root of the prefab. This is the only reliable way of determining if this GameObject reference was assigned from a prefab at edit-time or not.\par
+\cf2\i ~ What about asset bundles\par
+\cf0\i0\tab They are not currently support because I have little-to-no experience with them. They will probably be supported in the future once I have a better idea. \cf2\i\par
+~ What Resources tyes are currently supported?\par
+\cf0\i0\tab The following resources will be serialized as strings. \par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\fi-360\li1440\ri720\sa200\sl240\slmult1\tx900 Animation Clip\par
+{\pntext\f3\'B7\tab}Animator Controller\par
+{\pntext\f3\'B7\tab}Audio Clip\par
+{\pntext\f3\'B7\tab}Font\par
+{\pntext\f3\'B7\tab}GameObject Prefab (must have \i PrefabId \i0 component on root)\par
+{\pntext\f3\'B7\tab}Material\par
+{\pntext\f3\'B7\tab}Mesh\par
+{\pntext\f3\'B7\tab}PhysicMaterial\par
+{\pntext\f3\'B7\tab}PhysicsMaterial2D\par
+{\pntext\f3\'B7\tab}Shader\par
+{\pntext\f3\'B7\tab}Sprite\par
+{\pntext\f3\'B7\tab}Texture2D\par
+{\pntext\f3\'B7\tab}Texture3D\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\tab Anything not on this list will likely fall back on to the default \i UntiyEngine.Object \i0 surrogate and will be serialized in place as a unique copy. This will likely cause issues and in such cases I would suggest that you mark the fields as [NonSerialized] and manually re-attach the references in your own code after deserialization. Support for other resources types can be added by editing the files \i Constants.cs \i0 and \i ResourceManifest.c\i0 . These files are somewhat documented with comments about where and how to add new types. You should also note that the manifest files will store sprite references as both Sprites and Texture2Ds. It's not really an issue with anything but it can make the manifests a bit larger.\par
+\tab Each resource of a given type must compile to a unique resource path. That is to say, if you have two textures with the same name in the same sub-directories relative to a Resources folder then the manifest builder will spit out warnings. This is because it will be impossible to determine which resource you actually wanted to load at runtime since they will both have the same path (Unity, by default always takes the first available in such cases).\par
+\b Bad Example\b0 :  \tab PlayerAssets/Resources/Textures/MainText.png\par
+\tab\tab\tab NpcAssets/Resources/Textures/MainText.png\par
+In both cases this will compile to 'Textures/MainText.png'. There is no way for \i Resources.Load() \i0 to know which you actually want so it will always take the first available resource of the appropriate type.\par
+\b Good Example:\b0\tab PlayerAssets/Resources/Player/Textures/MainText.png\par
+\tab\tab\tab NpcAssets/Resources/Npc/Textures/MainText.png\par
+
+\pard\li720\ri720\sl240\slmult1\tx900\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\b Good Example:\b0  \tab PlayerAssets/Resources/Textures/PlayerText.png\par
+\tab\tab\tab NpcAssets/Resources/Textures/NpcText.png\par
+
+\pard\li720\ri720\sl240\slmult1\tx900\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\b Good Example:\b0  \tab PlayerAssets/Resources/Player.png (where this is a Texture asset)\par
+\tab\tab\tab PlayerAssets/Resources/Player.fbx (where this is a 3D model asset)\par
+In the first two examples, the resources will compile to unique names so everything will be ok. In the third example the resources are of a different type so again, it is ok.\par
+\tab One other consideration is the resource object's name. You know, the \i name \i0 field that all \i UnityEngine.Object\i0 s have. Not the name of the resource file but the actual \i UnityEngine.name\i0  field. This absolutely must not change after a manifest is built. This name is the only way the object can be traced back to the manifest at runtime. Keep this in mind especially with Shaders and GameObject prefabs because their names often get changed, sometimes automatically and even in project code just for the sake of easier object tracking in the editor.\par
+\par
+\b\fs24 Appendix\fs20\par
+\b0\tab Here you will find just the facts about Pantagruel's XML serializer. If you are quite familiar with the topic of serialization then everything you really need to know is right here.\par
+\ul Constants.cs\par
+\ulnone\tab The file found at \i Pantagruel/Serializer/Scripts/Constants.cs \i0 contains several important values. The most notable is \i Constants.RootPath\i0 . If you change the location of the Pantagruel project folder you must also change this path accordingly to reflect the new location.\par
+\ul Types Subject to Serialization\par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\li1080\ri720\sa200\sl240\slmult1\tx900\ulnone Primitives (int, float, double, char, etc) are all able to be serialized directly or as fields of a complex type. Strings are also treated as primitives.\par
+{\pntext\f3\'B7\tab}Enumerations are cast as ints.\par
+{\pntext\f3\'B7\tab}\i ISerializable \i0 interface is ignored.\par
+{\pntext\f3\'B7\tab}\i IXmlSerializable \i0 interface is honored but not recommended unless you know eactly what you need to do to make it work.\par
+{\pntext\f3\'B7\tab}Complex types are recursively serialized using reflection on fields within.\par
+{\pntext\f3\'B7\tab}Shared references to complex types and circular references are properly maintained.\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\ul Special Considerations\par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\li1080\ri720\sa200\sl240\slmult1\tx900\ulnone Polymorphism is handled correctly. Types are cast and stored in their true form when serialized.\ul\par
+{\pntext\f3\'B7\tab}\ulnone Generic types are serializable.\ul\par
+{\pntext\f3\'B7\tab}\ulnone Arrays, lists, and dictionaries, generic or not are all serialized properly.\ul\par
+{\pntext\f3\'B7\tab}\ulnone Delegates are subject to serialization. Note that the targets of invoked method calls will be serialized as well so be sure you actually want your delegates serialized.\ul\par
+{\pntext\f3\'B7\tab}\ulnone Anonymous delegates are not tested with this system yet.\ul\par
+{\pntext\f3\'B7\tab}\ulnone Events are \i not \i0 serialized.\ul\par
+{\pntext\f3\'B7\tab}\ulnone In order for a type to deserialize automatically it must have a default parameterless constructor. If it doesn't, then a serialization surrogate or activation surrogate  will be necessary in order to properly instantiate the object before the deserializer can fill out its data.\ul\par
+{\pntext\f3\'B7\tab}\ulnone Refences to GameObjects are serialized only if the root object passed is a GameObject. In this case all GameObjects in the hierarchy from that root object will be included along with all attached components of those GameObjects.\ul\par
+{\pntext\f3\'B7\tab}\ulnone Refences to Components will only be serialized if the root object passed is a GameObject. All components will be serialized as being attached to their respective GameObject within the hierarchy.\ul\par
+{\pntext\f3\'B7\tab}\ulnone If a Component is passed directly to the serializer then it will be necessary to use \i XmlDeserializer.DeserializeComponent<T>() \i0 and pass it an already instantiated instance of the correct Component type in order to deserialize that data again. This is due to the fact that Unity doesn't allow Components to be instantiated by themselves.\ul\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900 Complex Type Fields that are Handled\par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\li1080\ri720\sa200\sl240\slmult1\tx900\ulnone Public fields are serialized unless marked with [NonSerialized] or [XmlIgnore].\par
+{\pntext\f3\'B7\tab}Private fields are ignored unless marked with [SerializeField].\par
+{\pntext\f3\'B7\tab}Properties are usually ignored except in the case of anything deriving from \i UnityEngine.Object \i0 that isn't a Monobehaviour. In the case of UnityEngine.Objects, properties with public get/set accessors are serialized.\par
+{\pntext\f3\'B7\tab}Base class fields and properties are considered for serialization under the same rules above.\par
+{\pntext\f3\'B7\tab}[XmlIgnoreBaseType] can be used on a class to avoid serializing base class info.\par
+{\pntext\f3\'B7\tab}GameObject references are only serialized if the root object passed was a GameObject and the reference in question points to a GameObject that is within the hierarchy being serialized. If a reference points to something outside the hierarchy or it is not a hierarchy that is being serialized it will simply be null.\par
+{\pntext\f3\'B7\tab}Component references are also only serialized if they point to a Component that is attached to a GameObject that is within the hierarchy being serialized.\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\ul Attributes Utilized\par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\li1080\ri720\sa200\sl240\slmult1\tx900\ulnone Honors [SerializeField], [XmlIgnore], [NonSerialized] attributes on fields and properties as applies.\par
+{\pntext\f3\'B7\tab}Honors [XmlIgnoreBaseType] on classes.\par
+{\pntext\f3\'B7\tab}Ignores [Serializable] on classes. All types are subject to serialization.\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\ul Serialization Surrogates\ulnone\par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\li1080\ri720\sa200\sl240\slmult1\tx900 Classes that implement \i ISerializationSurrogate \i0 can be used to handle special-case serialization (this is how many Unity-specific objects are handled by Pantagruel in fact!).\par
+{\pntext\f3\'B7\tab}New surrogates can derive from \i SurrogateBase \i0 to help quickly develop them. It provides several helper methods for reflecting information about the objects you are serializing.\par
+{\pntext\f3\'B7\tab}The \i SurrogateBase \i0 has three very useful methods: \i GatherFields(), GatherProperties()\i0 , and \i GatherFieldsAndProps()\i0 . These can be used to collect info for a datatype you want to build a surrogate for. All three methods also have a 'filter' argument list that can contain a list of names that should be ignored when collecting fields and properties to serialize or deserialize.\par
+{\pntext\f3\'B7\tab}You can supply custom written surrogates to the serializer and deserializer by calling \i AddTemporarySurrogate() \i0 before caling Serialize or Deserialize. Afterward, these surrogates will be forgotten so you will need to re-apply them every time you want them to be used (hence the term 'temporary').\par
+{\pntext\f3\'B7\tab}Surrogates are considered in reverse order they were added so you can specify surrogates from most generic to most specific in that order.\par
+{\pntext\f3\'B7\tab}The \i StreamingContext.Context \i0 value passed to the surrogates during serialization/deserialization will be either an \i XmlSerializer.SerializeContext \i0 or \i XmlDeserializer.DeserializeContext \i0 object respectively. \par
+{\pntext\f3\'B7\tab}\i IActivationSurrogate \i0 can be implemented on a class and then applied just before deserialization using \cf6\highlight3\i AddTemporaryActivationSurrogate()\i0\lang1033 . These activation surrogates are used to simply create an instance of an object that does not have a default parameterless constructor.\cf0\highlight0\lang9\par
+{\pntext\f3\'B7\tab}\cf6\highlight3\lang1033 Activation surrogates are considered in reverse order they were added so that you can supply most generic to most specific type cases in that order.\cf0\highlight0\lang9\par
+{\pntext\f3\'B7\tab}\cf6\highlight3\lang1033 Surrogates are applied to complex types only. Primitives, strings, and enumerations will ignore them.\cf0\highlight0\lang9\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\ul Unity Resources\par
+\ulnone\tab\b Important: \b0 Each resource of a given type must compile to a unique resource path. That is to say, if you have two textures with the same name in the same sub-directories relative to a Resources folder then the manifest builder will spit out warnings. This is because it will be impossible to determine which resource you actually wanted to load at runtime since they will both have the same path (Unity, by default always takes the first available in such cases).\par
+\b Bad Example\b0 :  \tab PlayerAssets/Resources/Textures/MainText.png\par
+\tab\tab\tab NpcAssets/Resources/Textures/MainText.png\par
+In both cases this will compile to 'Textures/MainText.png'. There is no way for \i Resources.Load() \i0 to know which you actually want so it will always take the first available resource of the appropriate type.\par
+\b Good Example:\b0\tab PlayerAssets/Resources/Player/Textures/MainText.png\par
+\tab\tab\tab NpcAssets/Resources/Npc/Textures/MainText.png\par
+
+\pard\li720\ri720\sl240\slmult1\tx900\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\b Good Example:\b0  \tab PlayerAssets/Resources/Textures/PlayerText.png\par
+\tab\tab\tab NpcAssets/Resources/Textures/NpcText.png\par
+
+\pard\li720\ri720\sl240\slmult1\tx900\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\b Good Example:\b0  \tab PlayerAssets/Resources/Player.png (where this is a Texture asset)\par
+\tab\tab\tab PlayerAssets/Resources/Player.fbx (where this is a 3D model asset)\par
+In the first two examples, the resources will compile to unique names so everything will be ok. In the third example the resources are of a different type so again, it is ok.\par
+Other considerations are:\par
+
+\pard{\pntext\f3\'B7\tab}{\*\pn\pnlvlblt\pnf3\pnindent0{\pntxtb\'B7}}\li1080\ri720\sa200\sl240\slmult1\tx900 Prefabs must have a \i PrefabId \i0 Component attached to the root GameObject in order to be identified as a prefab and not a regular GameObject. This component automatically removes itself upon instatiation to avoid accidentally attempting to serialize a live object as a prefab resource.\par
+{\pntext\f3\'B7\tab}\i Animation Clips, Animator Controllers, Audio Clips, Fonts, GameObject prefabs, Meshes, Materials, PhysicMaterials, PhysicsMaterial2Ds, Shaders, Sprites, Texture2Ds, and Texture3Ds \i0 are currently supported.\par
+{\pntext\f3\'B7\tab}All resources references will be simply stored as a string that identifies the resource location and name within a Resources folder. \par
+{\pntext\f3\'B7\tab}Resources that are referenced \i must\i0  exist within a Resources folder so that they can be properly instantiated at runtime during deserialization\par
+{\pntext\f3\'B7\tab}A manifest library must be built at edit time (Window->Pantagruel->Resource manifest) and will only include supported resource types located in Resource folders. Only items in the manifest will be able to serialize and deserialize as resource paths.\par
+{\pntext\f3\'B7\tab}You \b absolutely must not \b0 change the root name field (e.x. root GameObject.name for a prefab) of a resource or prefab after you have built a manifest. If you do, the serializer will not be able to link that reference to the correct manifest at runtime and the reference will not serialize properly.\par
+{\pntext\f3\'B7\tab}All manifest files generated are named after the \i name \i0 field of the objects they store and not the filename of the resource. Many objects, like GameObject prefabs or Shaders, use different names than the file so this is required to allow linking at runtime since the original resource filename will no longer be accessible.\par
+{\pntext\f3\'B7\tab}\b Warning\b0 : Any resource type that is not supported will be serialized in place. Assuming the deserialization even works, the reference will now be to a copy rather than a shared reference.\par
+{\pntext\f3\'B7\tab}You can extend the resources that are supported by the manifest builder and serializer by editing the list in \i Pantagruel/Serializer/Scripts/Constants.cs \i0 as well as adding support code within \i Pantagruel/SerializerScripts/ResourceManifest.cs\i0 .\i\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\tx900\i0\par
+\ul Contact Info\ulnone\par
+Any questions, concerns, bugs, or requests can be directed to\par
+
+\pard\li720\ri720\sa200\sl240\slmult1\qc\tx900\cf1 pgi-support@ancientcraftgames.com\par
+\par
+}
+ 
